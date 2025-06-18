@@ -159,9 +159,9 @@ class Environment:
 
             [750, 265, 1000, 350],
 
-            [750, 300, 830, 600],
+#             [750, 300, 830, 600],
 
-            [700, 300, 450, 700],
+#             [700, 300, 450, 700],
 
             [450, 377, 700, 175],
 
@@ -352,10 +352,12 @@ class Drone:
     # ROT_VEL = 1.28
     # ROT_VEL = 0.64
     # ROT_VEL = 0.32
-    ROT_VEL = 0.08
+    ROT_VEL = 0.1 # original
+    # ROT_VEL = 0.16
     # ROT_VEL = 0.04
     # ACCELERATION = 1.0
-    ACCELERATION = 0.5
+    # ACCELERATION = 0.5 # original
+    ACCELERATION = 0.8
     # ACCELERATION = 0.3
     # ACCELERATION = 0.2
     # ACCELERATION = 0.05
@@ -407,7 +409,19 @@ class Drone:
             self.n_lap -= 1
         distance0 = np.sqrt((self.x - self.xi0) ** 2 + (self.y - self.yi0) ** 2)
         distance1 = np.sqrt((self.x - self.xi1) ** 2 + (self.y - self.yi1) ** 2)
-        self.reward_total = self.n_lap * self.env.n_goals + self.level + 1 * (distance0 / (distance0 + distance1))
+        
+        # Change reward equation
+        progress = distance0 / (distance0 + distance1 + 1e-6)
+        
+        clearance = np.median(self.echo_collision_distances_interp)
+        clearance_bonus = 0.4 * clearance 
+        
+        heading_bonus = 0.02 * np.cos(self.goal_ang_diff_interp * np.pi / 2)
+        
+        self.reward_total = (self.n_lap * self.env.n_goals + self.level + progress + clearance_bonus + heading_bonus)
+        
+        # Original:
+        # self.reward_total = self.n_lap * self.env.n_goals + self.level + 1 * (distance0 / (distance0 + distance1))
         self.reward_step = self.reward_total - reward_total_previous
 
     def update_reward_dynamic(self):  # dynamic
@@ -629,6 +643,8 @@ class ExploreDrone(gym.Env):
     def __init__(self, env_config={}):
         self.parse_env_config(env_config)
         self.win = None
+        # Added initialised flag 
+        self._switched_to_dynamic = False
         self.action_space = gym.spaces.Box(
             low=-1.,
             high=1.,
@@ -734,6 +750,8 @@ class ExploreDrone(gym.Env):
         self.gui_draw_goal_points = assign_dict['gui_draw_goal_points']
 
     def reset(self, *, seed=None, options=None):
+        self._switched_to_dynamic = False
+        self.reward_mode = "continuous"
         # ─── FLIP MIRROR ─────────────────────────────────────────────────
         if self.env_flipmode:
             if self.env_flipped:
@@ -847,6 +865,10 @@ class ExploreDrone(gym.Env):
 
             self.drone.framecount_goal += 1
             self.drone.framecount_total += 1
+            
+            if (not self._switched_to_dynamic) and (self.drone.n_lap >= 1):
+                self.reward_mode = "dynamic"
+                self._switched_to_dynamic = True
 
             if self.reward_mode == 'static':
                 self.drone.update_reward_static()
